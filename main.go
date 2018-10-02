@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
 
 var wg sync.WaitGroup
 var mapChannel chan map[string]int
-var mapPropertyChannel chan []Property
+var mapPropertyCreateChannel chan []Property
+var updateMainMapChannel chan []Property
 var propertyNumberMap map[string]int
 var tokenChannel chan bool
 var errorChannel chan error
@@ -33,6 +35,12 @@ type Property struct {
 	IsSold    bool   `json:"IsVerkocht"`
 }
 
+//PropertyPair as need to sort using slice
+type PropertyPair struct {
+	AgentName     string
+	NumProperties int
+}
+
 //1. get initial page. check no pages required to get all data.
 //2. create for loop number of pages. and execute client calls to api
 //on seperate go routines.
@@ -45,10 +53,11 @@ type Property struct {
 func main() {
 
 	propertyNumberMap = make(map[string]int)
-	mapPropertyChannel = make(chan []Property)
+	mapPropertyCreateChannel = make(chan []Property)
+	updateMainMapChannel = make(chan []Property)
 	errorChannel = make(chan error)
 	tokenChannel = make(chan bool, 20)
-	pageNo := 50
+	pageNo := 5
 
 	for i := 1; i <= pageNo; i++ {
 
@@ -61,12 +70,23 @@ func main() {
 		go func(mapMutex *sync.Mutex) {
 			unpdateMainPropertyMap(&wg, mapMutex)
 		}(&mapMutex)
+
+		select {
+
+		case errorMsg := <-errorChannel:
+			fmt.Println(errorMsg)
+			runBackOff()
+
+		case property := <-mapPropertyCreateChannel:
+			go func(property []Property) {
+				updateMainMapChannel <- property
+			}(property)
+		}
 	}
 
 	wg.Wait()
 	fmt.Println("printing map ....")
-	fmt.Println(propertyNumberMap)
-
+	fmt.Println(sortAgents(propertyNumberMap))
 	close(tokenChannel)
 }
 
@@ -93,18 +113,20 @@ func getFromWeb(wg *sync.WaitGroup, pageNo int) {
 	if resp.StatusCode == 200 {
 		var outer OuterData
 		json.NewDecoder(resp.Body).Decode(&outer)
-		mapPropertyChannel <- outer.PropertyObjects
+		fmt.Println(outer.PropertyObjects)
+		fmt.Println(fmt.Sprintf("page no %d", pageNo))
+		fmt.Println("")
+		mapPropertyCreateChannel <- outer.PropertyObjects
 
 	} else {
-		fmt.Println(fmt.Sprintf("failed with resp code : %d and page no: %d", resp.StatusCode, pageNo))
-		fmt.Println(resp.Status)
 		wg.Done()
+		errorChannel <- fmt.Errorf("%s", resp.Status)
 	}
 }
 
 func unpdateMainPropertyMap(wg *sync.WaitGroup, mapMutex *sync.Mutex) {
 
-	for properties := range mapPropertyChannel {
+	for properties := range updateMainMapChannel {
 
 		mapMutex.Lock()
 		for _, property := range properties {
@@ -119,7 +141,7 @@ func unpdateMainPropertyMap(wg *sync.WaitGroup, mapMutex *sync.Mutex) {
 		wg.Done()
 	}
 
-	close(mapPropertyChannel)
+	close(updateMainMapChannel)
 }
 
 func showLoadingDialog() {
@@ -132,11 +154,23 @@ func showLoadingDialog() {
 
 //sleep main go routine
 func runBackOff() {
+	fmt.Println("backoff running!!")
 	time.Sleep(1 * time.Minute)
 }
 
-func sortAgents() {
+func sortAgents(propertyNumberMap map[string]int) []PropertyPair {
 
+	var propertyPairs []PropertyPair
+
+	for key, val := range propertyNumberMap {
+		propertyPairs = append(propertyPairs, PropertyPair{AgentName: key, NumProperties: val})
+	}
+
+	sort.Slice(propertyPairs, func(i int, j int) bool {
+		return (propertyPairs[i].NumProperties > propertyPairs[j].NumProperties)
+	})
+
+	return propertyPairs
 }
 
 func displayTable() {
