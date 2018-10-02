@@ -17,6 +17,7 @@ var updateMainMapChannel chan []Property
 var propertyNumberMap map[string]int
 var tokenChannel chan bool
 var errorChannel chan error
+var stopChannel chan bool
 var mapMutex sync.Mutex
 
 const propertiesURL = "http://partnerapi.funda.nl/feeds/Aanbod.svc/json/ac1b0b1572524640a0ecc54de453ea9f/?type=koop&zo=/amsterdam/&page=%d"
@@ -57,7 +58,10 @@ func main() {
 	updateMainMapChannel = make(chan []Property)
 	errorChannel = make(chan error)
 	tokenChannel = make(chan bool, 20)
-	pageNo := 5
+	stopChannel = make(chan bool)
+	pageNo := 100
+
+	go spinner(100*time.Millisecond, stopChannel)
 
 	for i := 1; i <= pageNo; i++ {
 
@@ -73,19 +77,20 @@ func main() {
 
 		select {
 
-		case errorMsg := <-errorChannel:
-			fmt.Println(errorMsg)
+		case <-errorChannel:
 			runBackOff()
+			i--
+			continue
 
 		case property := <-mapPropertyCreateChannel:
-			go func(property []Property) {
-				updateMainMapChannel <- property
-			}(property)
+			updateMainMapChannel <- property
 		}
 	}
 
 	wg.Wait()
-	fmt.Println("printing map ....")
+	stopChannel <- true
+	fmt.Println("")
+	fmt.Println("printing data ....")
 	fmt.Println(sortAgents(propertyNumberMap))
 	close(tokenChannel)
 }
@@ -113,9 +118,6 @@ func getFromWeb(wg *sync.WaitGroup, pageNo int) {
 	if resp.StatusCode == 200 {
 		var outer OuterData
 		json.NewDecoder(resp.Body).Decode(&outer)
-		fmt.Println(outer.PropertyObjects)
-		fmt.Println(fmt.Sprintf("page no %d", pageNo))
-		fmt.Println("")
 		mapPropertyCreateChannel <- outer.PropertyObjects
 
 	} else {
@@ -144,18 +146,8 @@ func unpdateMainPropertyMap(wg *sync.WaitGroup, mapMutex *sync.Mutex) {
 	close(updateMainMapChannel)
 }
 
-func showLoadingDialog() {
-
-	go func() {
-
-	}()
-
-}
-
-//sleep main go routine
 func runBackOff() {
-	fmt.Println("backoff running!!")
-	time.Sleep(1 * time.Minute)
+	time.Sleep(20 * time.Second)
 }
 
 func sortAgents(propertyNumberMap map[string]int) []PropertyPair {
@@ -174,5 +166,23 @@ func sortAgents(propertyNumberMap map[string]int) []PropertyPair {
 }
 
 func displayTable() {
+
+}
+
+func spinner(delay time.Duration, stopChannel chan bool) {
+
+Exit:
+	for {
+		select {
+		default:
+			for _, r := range `-\||/` {
+				fmt.Printf("\r%c", r)
+				time.Sleep(delay)
+			}
+
+		case <-stopChannel:
+			continue Exit
+		}
+	}
 
 }
