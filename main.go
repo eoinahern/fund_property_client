@@ -11,12 +11,10 @@ import (
 )
 
 var wg sync.WaitGroup
-var mapChannel chan map[string]int
 var mapPropertyCreateChannel chan []Property
 var updateMainMapChannel chan []Property
 var propertyNumberMap map[string]int
 var tokenChannel chan bool
-var errorChannel chan error
 var stopChannel chan bool
 var mapMutex sync.Mutex
 
@@ -42,25 +40,23 @@ type PropertyPair struct {
 	NumProperties int
 }
 
-//1. get initial page. check no pages required to get all data.
+//1. get initial page count. check no pages required to get all data.
 //2. create for loop number of pages. and execute client calls to api
 //on seperate go routines.
 //3.  desrialize data. append to total make agent name. and append num properties.
 // in map form.
 //4. backoff for 1 minute if api limit of 100 reached.(show some loading dialog etc for this??)
 //5. continue. create final map of data and sort highest to lowest.
-//6. display data in some for html? or cmd printout.
+//6. repeat steps 1 -5 twice for different endpoints.
+//7. display data in some for html? or cmd printout.
 
 func main() {
 
 	propertyNumberMap = make(map[string]int)
-	mapPropertyCreateChannel = make(chan []Property)
 	updateMainMapChannel = make(chan []Property)
-	errorChannel = make(chan error)
 	tokenChannel = make(chan bool, 20)
 	stopChannel = make(chan bool)
-	pageNo := 100
-
+	pageNo := 150
 	go spinner(100*time.Millisecond, stopChannel)
 
 	for i := 1; i <= pageNo; i++ {
@@ -74,17 +70,6 @@ func main() {
 		go func(mapMutex *sync.Mutex) {
 			unpdateMainPropertyMap(&wg, mapMutex)
 		}(&mapMutex)
-
-		select {
-
-		case <-errorChannel:
-			runBackOff()
-			i--
-			continue
-
-		case property := <-mapPropertyCreateChannel:
-			updateMainMapChannel <- property
-		}
 	}
 
 	wg.Wait()
@@ -93,6 +78,7 @@ func main() {
 	fmt.Println("printing data ....")
 	fmt.Println(sortAgents(propertyNumberMap))
 	close(tokenChannel)
+	close(stopChannel)
 }
 
 /**
@@ -105,6 +91,7 @@ func getFromWeb(wg *sync.WaitGroup, pageNo int) {
 	url := fmt.Sprintf(propertiesURL, pageNo)
 
 	tokenChannel <- true
+	time.Sleep(2 * time.Second)
 	resp, err := http.Get(url)
 	<-tokenChannel
 
@@ -118,11 +105,11 @@ func getFromWeb(wg *sync.WaitGroup, pageNo int) {
 	if resp.StatusCode == 200 {
 		var outer OuterData
 		json.NewDecoder(resp.Body).Decode(&outer)
-		mapPropertyCreateChannel <- outer.PropertyObjects
+		updateMainMapChannel <- outer.PropertyObjects
 
 	} else {
-		wg.Done()
-		errorChannel <- fmt.Errorf("%s", resp.Status)
+		runBackOff()
+		getFromWeb(wg, pageNo)
 	}
 }
 
@@ -165,10 +152,6 @@ func sortAgents(propertyNumberMap map[string]int) []PropertyPair {
 	return propertyPairs
 }
 
-func displayTable() {
-
-}
-
 func spinner(delay time.Duration, stopChannel chan bool) {
 
 Exit:
@@ -184,5 +167,4 @@ Exit:
 			continue Exit
 		}
 	}
-
 }
