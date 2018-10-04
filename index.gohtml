@@ -1,0 +1,32 @@
+ <!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Amsterdam Properties</title>
+  </head>
+  <body>
+
+
+ <h2>Properties in Amsterdam by Agent</h2>
+  <table>
+  <tr><th>Agents</th><th>Num. Properties</th></tr>
+  {{range .PropertiesRegular}}
+    <tr> <td>{{.AgentName}} </td> <td align="center">{{.NumProperties}} </td> </tr>
+  {{end}}
+  </table>
+
+  <br/>
+
+  <h2>Properties in Amsterdam with Garden by Agent</h2>
+  <table>
+  <tr><th>Agents</th><th>Num. Properties</th></tr>
+  {{range .PropertiesWithGarden}}
+    <tr> <td>{{.AgentName}} </td> <td align="center">{{.NumProperties}} </td> </tr>
+  {{end}}
+  </table>
+
+
+
+  
+  </body>
+</html>
