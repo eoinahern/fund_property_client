@@ -142,7 +142,6 @@ func initCall(endPoint string, numPages int, resultsMap map[string]int, property
 
 /**
 * execute a bunch of calls to the api extract a map.
-* key = name of property manager. value num = of properties
 **/
 
 func getPropertyListings(wg *sync.WaitGroup, urlEndpoint string, pageNo int,
@@ -168,10 +167,19 @@ func getPropertyListings(wg *sync.WaitGroup, urlEndpoint string, pageNo int,
 		writeChannel <- outer.PropertyObjects
 
 	} else {
+
+		//retry infinite amount of times on failure
+		// could limit number retries here also.
+
 		runBackOff()
 		getPropertyListings(wg, urlEndpoint, pageNo, writeChannel)
 	}
 }
+
+/**
+* read from dedicated channel property slice. update map.
+* lock on map to prevent race condition.
+**/
 
 func unpdatePropertyMap(wg *sync.WaitGroup, mapMutex *sync.Mutex, propertymap map[string]int,
 	readChannel <-chan []Property) {
